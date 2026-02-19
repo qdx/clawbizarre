@@ -1,0 +1,524 @@
+openapi: 3.1.0
+info:
+  title: ClawBizarre Verification Protocol
+  version: 1.0.0
+  description: |
+    Structural code verification for AI agent-to-agent commerce.
+    Executes test suites against submitted code in sandboxed environments
+    and returns cryptographically signed VRF (Verification Receipt Format) receipts.
+  license:
+    name: MIT
+    url: https://github.com/qdx/clawbizarre/blob/main/LICENSE
+  contact:
+    name: ClawBizarre
+    url: https://github.com/qdx/clawbizarre
+
+servers:
+  - url: http://localhost:8700
+    description: Local development
+  - url: https://verify.clawbizarre.fly.dev
+    description: Production (Fly.io)
+
+security:
+  - bearerAuth: []
+  - {}
+
+paths:
+  /verify:
+    post:
+      operationId: verify
+      summary: Verify code against a test suite
+      description: |
+        Tier 0: Executes test cases against provided code in a sandboxed subprocess.
+        Tier 1: Validates output against JSON schema and constraints (no execution).
+        Returns an Ed25519-signed VRF receipt with pass/fail verdict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+            examples:
+              python_basic:
+                summary: Simple Python function test
+                value:
+                  output:
+                    content: "def add(a, b): return a + b"
+                  verification:
+                    tier: 0
+                    test_suite:
+                      language: python
+                      tests:
+                        - name: add_basic
+                          input: "add(1, 2)"
+                          expected_output: "3"
+                        - name: add_negative
+                          input: "add(-1, 1)"
+                          expected_output: "0"
+              javascript_docker:
+                summary: JavaScript test (Docker sandbox)
+                value:
+                  output:
+                    content: "function multiply(a, b) { return a * b; }"
+                  verification:
+                    tier: 0
+                    test_suite:
+                      language: javascript
+                      tests:
+                        - name: multiply_basic
+                          expression: "multiply(3, 4)"
+                          expected: "12"
+              schema_validation:
+                summary: Tier 1 schema check (no execution)
+                value:
+                  output:
+                    content: '{"name": "Alice", "age": 30}'
+                  verification:
+                    tier: 1
+                    schema:
+                      type: object
+                      required: [name, age]
+                      properties:
+                        name: {type: string}
+                        age: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Verification receipt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRFReceipt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /verify/schema:
+    post:
+      operationId: verifySchema
+      summary: Verify output against schema (Tier 1 shorthand)
+      description: Convenience endpoint — equivalent to POST /verify with tier=1.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+      responses:
+        '200':
+          description: Verification receipt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRFReceipt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /receipt/verify:
+    post:
+      operationId: verifyReceipt
+      summary: Verify Ed25519 signature on a VRF receipt
+      description: |
+        Checks that a receipt's signature is valid. Does NOT re-execute tests.
+        Used by third parties to validate receipt authenticity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/VRFReceipt'
+                - type: object
+                  properties:
+                    receipt:
+                      $ref: '#/components/schemas/VRFReceipt'
+      responses:
+        '200':
+          description: Signature verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  receipt_id:
+                    type: string
+                  signer:
+                    type: string
+                    description: Hex-encoded Ed25519 public key
+                  error:
+                    type: string
+
+  /receipt/{receiptId}:
+    get:
+      operationId: getReceipt
+      summary: Retrieve a stored VRF receipt
+      parameters:
+        - name: receiptId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The receipt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VRFReceipt'
+        '404':
+          description: Receipt not found
+
+  /receipts:
+    get:
+      operationId: queryReceipts
+      summary: Query stored receipts
+      description: Requires SQLite persistence to be enabled (--db flag).
+      parameters:
+        - name: verdict
+          in: query
+          schema:
+            type: string
+            enum: [pass, fail, partial, error]
+        - name: task_type
+          in: query
+          schema:
+            type: string
+        - name: output_hash
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 1000
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Matching receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VRFReceipt'
+                  count:
+                    type: integer
+        '501':
+          description: Persistence not enabled
+
+  /health:
+    get:
+      operationId: health
+      summary: Service health check
+      security: []
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  version:
+                    type: string
+                    example: clawbizarre-verify/1.0-hardened
+                  vrf_version:
+                    type: string
+                    example: "1.0"
+                  multilang:
+                    type: boolean
+                    description: Whether Docker-based multi-language support is available
+                  languages:
+                    type: array
+                    items:
+                      type: string
+                    example: [python, javascript, node, bash]
+                  requests_served:
+                    type: integer
+                  auth_required:
+                    type: boolean
+
+  /stats:
+    get:
+      operationId: stats
+      summary: Service statistics
+      responses:
+        '200':
+          description: Stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipts_stored:
+                    type: integer
+                  persistence:
+                    type: string
+                    enum: [sqlite, memory]
+                  supported_tiers:
+                    type: array
+                    items:
+                      type: integer
+                    example: [0, 1]
+                  version:
+                    type: string
+                  requests_served:
+                    type: integer
+
+  /metrics:
+    get:
+      operationId: metrics
+      summary: Prometheus-compatible metrics
+      security: []
+      responses:
+        '200':
+          description: Metrics in Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /docs:
+    get:
+      operationId: docs
+      summary: Self-describing API documentation
+      security: []
+      responses:
+        '200':
+          description: JSON API documentation
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Optional API key (set via --api-key or CLAWBIZARRE_API_KEY env)
+
+  schemas:
+    VerifyRequest:
+      type: object
+      required: [output, verification]
+      properties:
+        output:
+          type: object
+          required: [content]
+          properties:
+            content:
+              type: string
+              description: The code or data to verify
+              maxLength: 51200
+        verification:
+          type: object
+          required: [tier]
+          properties:
+            tier:
+              type: integer
+              enum: [0, 1]
+              description: "0 = test suite execution, 1 = schema/constraint check"
+            test_suite:
+              $ref: '#/components/schemas/TestSuite'
+            schema:
+              type: object
+              description: JSON Schema for Tier 1 validation
+            constraints:
+              type: array
+              items:
+                type: string
+              description: Additional constraint expressions for Tier 1
+            use_docker:
+              type: boolean
+              default: false
+              description: Force Docker sandbox (required for non-Python)
+        task_id:
+          type: string
+          description: Optional task identifier for receipt tracking
+        task_type:
+          type: string
+          description: Optional task type for receipt categorization
+
+    TestSuite:
+      type: object
+      required: [tests]
+      properties:
+        language:
+          type: string
+          enum: [python, javascript, node, bash]
+          default: python
+        tests:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/TestCase'
+
+    TestCase:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        input:
+          type: string
+          description: "Python: expression eval'd in code namespace"
+        expected_output:
+          type: string
+          description: "Python: expected value (eval'd)"
+        expression:
+          type: string
+          description: "Docker (JS/bash): expression to evaluate"
+        expected:
+          type: string
+          description: "Docker (JS/bash): expected output"
+        timeout_ms:
+          type: integer
+          default: 30000
+
+    VRFReceipt:
+      type: object
+      description: Verification Receipt Format v1.0
+      properties:
+        vrf_version:
+          type: string
+          const: "1.0"
+        receipt_id:
+          type: string
+          format: uuid
+        verified_at:
+          type: string
+          format: date-time
+        tier:
+          type: integer
+          enum: [0, 1]
+        verdict:
+          type: string
+          enum: [pass, fail, partial, error]
+        results:
+          type: object
+          properties:
+            total:
+              type: integer
+            passed:
+              type: integer
+            failed:
+              type: integer
+            errors:
+              type: integer
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  status:
+                    type: string
+                    enum: [pass, fail, error, timeout]
+                  duration_ms:
+                    type: number
+                  output:
+                    type: string
+                  error:
+                    type: string
+        hashes:
+          type: object
+          properties:
+            input_hash:
+              type: string
+              description: "sha256:<hex16> of input"
+            output_hash:
+              type: string
+              description: "sha256:<hex16> of code content"
+            suite_hash:
+              type: string
+              description: "sha256:<hex16> of test suite"
+            environment_hash:
+              type: string
+            algorithm:
+              type: string
+              default: sha256
+        metadata:
+          type: object
+          properties:
+            server_version:
+              type: string
+            execution_environment:
+              type: string
+            language:
+              type: string
+        task_id:
+          type: string
+        task_type:
+          type: string
+        signature:
+          type: object
+          description: Ed25519 signature
+          properties:
+            algorithm:
+              type: string
+              const: ed25519
+            public_key:
+              type: string
+              description: Hex-encoded public key
+            signature:
+              type: string
+              description: Hex-encoded signature over canonical receipt JSON
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              request_id:
+                type: string
+    RateLimited:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              retry_after:
+                type: number
+    InternalError:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              request_id:
+                type: string

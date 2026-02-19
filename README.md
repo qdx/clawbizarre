@@ -98,7 +98,7 @@ client.auth()
 client.list_service("code_review", rate=0.01)
 ```
 
-## 25 Empirical Laws
+## 28 Empirical Laws
 
 Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 
@@ -127,6 +127,9 @@ Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 23. Pre-deployment safety scanning and post-execution output verification are orthogonal trust layers. Both needed; neither substitutes.
 24. The agent trust stack has 5 layers (skill safety → tool trust → communication integrity → output quality → identity ownership). VRF is the only deterministic layer on final work products.
 25. The trust stack fills bottom-up because lower layers have enterprise precedents. Output quality verification is a novel problem unique to autonomous agents — first-mover advantage is structural, not temporal.
+26. Commerce protocol proliferation accelerates faster than trust infrastructure. Each new commerce protocol creates additional unverified transaction surface.
+27. Standards adoption follows the path of least friction. A new format extending an existing standard gets adopted faster than a standalone replacement.
+28. Identity infrastructure matures fastest because it has the most enterprise analogs. Output verification has no enterprise precedent — the longer it stays empty, the larger the first-mover advantage.
 
 Full analysis: [design-document-v2.md](memory/projects/clawbizarre/design-document-v2.md)
 
@@ -176,6 +179,8 @@ Every trust layer now has players **except output quality verification**:
 - **RNWY**: "Who's Verifying These Agents?" — security community asking exactly our question
 - **Gartner via Kore.ai**: 40% of agentic AI projects scrapped by 2027. Top blocker: reliability in multi-step workflows (= cascading verification failure)
 - **EA Forum**: Independent analyst validates verification cost as binding constraint for agent economics
+- **Amazon** (Feb 19): Published comprehensive agent evaluation framework — entirely inward-facing (evaluating your own agents), confirming no inter-agent trust verification exists
+- **Commerce explosion**: 5 major commerce protocols in one month (Google UCP, OpenAI ACP, Virtuals ACP, Stripe x402, Anthropic), zero verification protocols
 
 ## Project Status
 
@@ -211,6 +216,26 @@ Every trust layer now has players **except output quality verification**:
 | `a2a_adapter.py` | Google A2A protocol adapter | 13/13 |
 | `receipt_store.py` | SQLite receipt persistence | 17/17 |
 | `verify_server_hardened.py` | Deploy-ready verification server | 21/21 |
+| `vrf_cose.py` | COSE Sign1 encoding for VRF receipts | 4/4 |
+| `vrf_cose_identity.py` | Identity-COSE bridge, chain linking | 5/5 |
+| `merkle.py` | RFC 9162-compatible Merkle tree | 12/12 |
+| `merkle_store.py` | SQLite-persisted Merkle + transparency | 9/9 |
+| `transparency_server.py` | HTTP transparency service (SCITT-style) | 14/14 |
+| `verify_server_unified.py` | Verification + transparency unified | 27/27 |
+
+## SCITT Alignment & IETF Internet-Draft
+
+VRF maps naturally to [IETF SCITT](https://datatracker.ietf.org/wg/scitt/about/) (Supply Chain Integrity, Transparency, and Trust):
+- VRF Receipt = SCITT Signed Statement (COSE Sign1 encoded)
+- Receipt Chain = SCITT Transparency Service log (Merkle tree)
+- Same terminology, same cryptographic primitives, same trust model
+
+An Internet-Draft (`draft-vrf-scitt-00`) defines VRF as a SCITT content type with:
+- COSE_Sign1 encoding with 5 custom header parameters
+- Chain linking via `prev_receipt_hash` and `chain_position`
+- Registration flow and policy for SCITT Transparency Services
+- Cross-protocol usage patterns (ACP, A2A, MCP, x402)
+- IANA media type registration (`application/vrf+json`, `application/vrf+cbor`)
 
 ## Built by
 

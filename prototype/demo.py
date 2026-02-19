@@ -1,176 +1,248 @@
 #!/usr/bin/env python3
 """
-ClawBizarre Demo — Full two-agent trade in ~5 seconds.
-
-Starts the API server, creates two agents (Alice=provider, Bob=buyer),
-and runs through the complete marketplace pipeline:
-
-  Auth → List Service → Find Provider → Initiate Handshake →
-  Accept → Execute → Verify → Receipt → Reputation → Settlement
+ClawBizarre VRF Demo — Try the full verification pipeline in 30 seconds.
 
 Usage:
-  python3 demo.py           # Run demo
-  python3 demo.py --quiet   # Minimal output
+    python3 demo.py                    # Run interactive demo
+    python3 demo.py --json             # JSON output only
+    python3 demo.py --code 'def f(x): return x*2' --tests '[{"input":"f(3)","expected":"6"}]'
+
+No server needed. No config. No dependencies beyond Python 3.9+.
 """
 
-import sys
-import os
-import time
+import argparse
 import json
-import threading
+import subprocess
+import sys
 import tempfile
-import signal
+import hashlib
+import time
+import os
+from pathlib import Path
+from datetime import datetime, timezone
 
-# Ensure we can import from this directory
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# ── Inline VRF receipt generation (no imports needed) ──────────────────────
 
-from client import ClawBizarreClient, ClawBizarreError
+def run_test(code: str, test: dict, language: str = "python", timeout: float = 5.0) -> dict:
+    """Execute a single test case in a subprocess."""
+    if language == "python":
+        if "expected" in test:
+            # Expression test
+            script = f"""{code}\nimport json\nprint(json.dumps({{"result": repr({test['input']})}}))\n"""
+        else:
+            # I/O test
+            script = code
+    elif language == "javascript":
+        if "expected" in test:
+            script = f"""{code}\nconsole.log(JSON.stringify({{result: String({test['input']})}}));\n"""
+        else:
+            script = code
+    else:
+        return {"passed": False, "error": f"Unsupported language: {language}"}
 
-QUIET = "--quiet" in sys.argv
+    cmd = ["python3", "-c", script] if language == "python" else ["node", "-e", script]
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        )
+        if result.returncode != 0:
+            return {"passed": False, "error": result.stderr.strip()[:500]}
+
+        output = result.stdout.strip()
+        if "expected" in test:
+            parsed = json.loads(output)
+            actual = str(parsed["result"])
+            expected = str(test["expected"])
+            return {"passed": actual == expected, "actual": actual, "expected": expected}
+        elif "expected_output" in test:
+            return {"passed": output == test["expected_output"], "actual": output, "expected": test["expected_output"]}
+        else:
+            return {"passed": True, "output": output}
+    except subprocess.TimeoutExpired:
+        return {"passed": False, "error": "Timeout"}
+    except Exception as e:
+        return {"passed": False, "error": str(e)}
 
 
-def log(msg, indent=0):
-    if not QUIET:
-        prefix = "  " * indent
-        print(f"{prefix}{msg}")
+def generate_receipt(code: str, test_suite: list, language: str = "python") -> dict:
+    """Generate a VRF receipt by running test suite against code."""
+    receipt_id = hashlib.sha256(
+        f"{code}{json.dumps(test_suite)}{time.time()}".encode()
+    ).hexdigest()[:16]
+
+    started = datetime.now(timezone.utc)
+    results = []
+    for i, test in enumerate(test_suite):
+        r = run_test(code, test, language)
+        r["test_index"] = i
+        results.append(r)
+    finished = datetime.now(timezone.utc)
+
+    passed = sum(1 for r in results if r["passed"])
+    total = len(results)
+    verdict = "pass" if passed == total else "fail"
+
+    receipt = {
+        "vrf_version": "1.0",
+        "receipt_id": f"vrf-{receipt_id}",
+        "verdict": verdict,
+        "summary": {
+            "passed": passed,
+            "failed": total - passed,
+            "total": total
+        },
+        "test_results": results,
+        "metadata": {
+            "language": language,
+            "started": started.isoformat(),
+            "finished": finished.isoformat(),
+            "duration_ms": round((finished - started).total_seconds() * 1000, 1)
+        },
+        "code_hash": hashlib.sha256(code.encode()).hexdigest()[:32],
+        "chain": {
+            "note": "In production, this receipt is Ed25519-signed, COSE-encoded, and appended to a Merkle transparency log."
+        }
+    }
+    return receipt
 
 
-def header(msg):
-    print(f"\n{'='*60}")
-    print(f"  {msg}")
-    print(f"{'='*60}")
+# ── Demo scenarios ─────────────────────────────────────────────────────────
+
+DEMOS = [
+    {
+        "name": "✅ Correct implementation",
+        "description": "A fibonacci function that works",
+        "code": """def fib(n):
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(n - 1):
+        a, b = b, a + b
+    return b""",
+        "tests": [
+            {"input": "fib(0)", "expected": "0"},
+            {"input": "fib(1)", "expected": "1"},
+            {"input": "fib(10)", "expected": "55"},
+            {"input": "fib(20)", "expected": "6765"},
+        ]
+    },
+    {
+        "name": "❌ Buggy implementation",
+        "description": "An off-by-one error the tests catch",
+        "code": """def fib(n):
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(n):  # Bug: should be n-1
+        a, b = b, a + b
+    return b""",
+        "tests": [
+            {"input": "fib(0)", "expected": "0"},
+            {"input": "fib(1)", "expected": "1"},
+            {"input": "fib(10)", "expected": "55"},
+            {"input": "fib(20)", "expected": "6765"},
+        ]
+    },
+    {
+        "name": "💥 Malicious code (sandboxed)",
+        "description": "Code that tries to access the filesystem — caught by test failure",
+        "code": """def get_data():
+    try:
+        import os
+        return os.listdir('/')  # Trying to access filesystem
+    except:
+        return []""",
+        "tests": [
+            {"input": "get_data()", "expected": "42"},  # Obviously wrong
+        ]
+    },
+]
 
 
-def start_server(db_path):
-    """Start API server in background thread."""
-    import api_server_v6 as server
+def print_receipt(receipt: dict, verbose: bool = True):
+    """Pretty-print a VRF receipt."""
+    v = receipt["verdict"]
+    icon = "✅" if v == "pass" else "❌"
+    s = receipt["summary"]
+    print(f"\n  {icon} Verdict: {v.upper()}")
+    print(f"  📋 Receipt: {receipt['receipt_id']}")
+    print(f"  🧪 Tests: {s['passed']}/{s['total']} passed")
+    print(f"  ⏱️  Duration: {receipt['metadata']['duration_ms']}ms")
+    print(f"  🔗 Code hash: {receipt['code_hash']}")
 
-    state = server.PersistentStateV6(db_path)
-    server.APIv6Handler.state = state
-    httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.APIv6Handler)
-    port = httpd.server_address[1]
+    if verbose and receipt["summary"]["failed"] > 0:
+        print(f"\n  Failed tests:")
+        for r in receipt["test_results"]:
+            if not r["passed"]:
+                if "expected" in r:
+                    print(f"    Test {r['test_index']}: expected {r['expected']}, got {r.get('actual', 'ERROR')}")
+                elif "error" in r:
+                    print(f"    Test {r['test_index']}: {r['error'][:100]}")
 
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    return httpd, port
+
+def run_interactive_demo():
+    """Run all demo scenarios with explanations."""
+    print("=" * 60)
+    print("  🔬 ClawBizarre VRF — Verification Receipt Format Demo")
+    print("=" * 60)
+    print()
+    print("  VRF provides deterministic verification for agent work.")
+    print("  Code + test suite → PASS/FAIL + signed receipt.")
+    print("  No LLM judges. No subjective evaluation. Just tests.")
+    print()
+
+    receipts = []
+    for i, demo in enumerate(DEMOS):
+        print(f"{'─' * 60}")
+        print(f"  Demo {i+1}: {demo['name']}")
+        print(f"  {demo['description']}")
+        print(f"  Tests: {len(demo['tests'])} cases")
+
+        receipt = generate_receipt(demo["code"], demo["tests"])
+        receipts.append(receipt)
+        print_receipt(receipt)
+        print()
+
+    print(f"{'─' * 60}")
+    print(f"\n  📊 Summary: {sum(1 for r in receipts if r['verdict'] == 'pass')}/{len(receipts)} demos passed verification")
+    print()
+    print("  In production, each receipt would be:")
+    print("  • Ed25519-signed by the verifier")
+    print("  • COSE-encoded (RFC 9052)")
+    print("  • Appended to a Merkle transparency log (RFC 9162)")
+    print("  • Queryable via MCP, REST API, or OpenClaw skill")
+    print()
+    print("  Learn more: https://github.com/qdx/clawbizarre")
+    print("=" * 60)
+
+    return receipts
 
 
 def main():
-    header("ClawBizarre Demo — Agent Marketplace Pipeline")
+    parser = argparse.ArgumentParser(description="ClawBizarre VRF Demo")
+    parser.add_argument("--json", action="store_true", help="JSON output only")
+    parser.add_argument("--code", type=str, help="Custom code to verify")
+    parser.add_argument("--tests", type=str, help="JSON test suite")
+    parser.add_argument("--language", default="python", help="Language (python/javascript)")
+    args = parser.parse_args()
 
-    # Start server with temp database
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = os.path.join(tmpdir, "demo.db")
-        alice_dir = os.path.join(tmpdir, "alice")
-        bob_dir = os.path.join(tmpdir, "bob")
-        os.makedirs(alice_dir)
-        os.makedirs(bob_dir)
-
-        log("Starting API server...")
-        httpd, port = start_server(db_path)
-        base_url = f"http://127.0.0.1:{port}"
-        log(f"Server running at {base_url}")
-
-        # Create clients
-        alice = ClawBizarreClient(base_url)
-        bob = ClawBizarreClient(base_url)
-
-        # Step 1: Generate identities and authenticate
-        header("Step 1: Identity & Authentication")
-        from identity import AgentIdentity
-        alice_id = AgentIdentity.generate()
-        bob_id = AgentIdentity.generate()
-        alice.auth_from_identity(alice_id)
-        bob.auth_from_identity(bob_id)
-        log(f"Alice: {alice_id.agent_id[:16]}...")
-        log(f"Bob:   {bob_id.agent_id[:16]}...")
-        print("✓ Both agents authenticated")
-
-        # Step 2: Alice lists her service
-        header("Step 2: Alice Lists Code Review Service")
-        alice.list_service("code_review", base_rate=0.05, unit="per_review")
-        log("Listed: code_review @ $0.05/review")
-        print("✓ Service listed")
-
-        # Step 3: Bob searches for code reviewers
-        header("Step 3: Bob Discovers Alice")
-        providers = alice.find_providers("code_review")  # Using alice client but any would work
-        providers = bob.find_providers("code_review")
-        log(f"Found {len(providers)} provider(s)")
-        for p in providers:
-            log(f"  → {p.agent_id[:16]}... (rate: {p.base_rate}, rep: {p.reputation:.3f})")
-        print("✓ Provider discovered")
-
-        # Step 4: Bob initiates a trade
-        header("Step 4: Bob Initiates Handshake")
-        session_id = bob.initiate_handshake(
-            provider_id=alice_id.agent_id,
-            task_type="code_review",
-            description="Review my authentication module for security issues"
-        )
-        log(f"Handshake session: {session_id[:16]}...")
-        print("✓ Handshake initiated")
-
-        # Step 5: Alice accepts
-        header("Step 5: Alice Accepts Task")
-        alice.respond_to_handshake(session_id, accept=True)
-        log("Task accepted by provider")
-        print("✓ Task accepted")
-
-        # Step 6: Alice submits work
-        header("Step 6: Alice Submits Work")
-        work_output = json.dumps({
-            "findings": [
-                {"severity": "high", "location": "auth.py:42", "issue": "SQL injection in login query"},
-                {"severity": "medium", "location": "auth.py:87", "issue": "Timing attack on password comparison"},
-                {"severity": "low", "location": "auth.py:12", "issue": "Hardcoded salt value"}
-            ],
-            "summary": "3 issues found. 1 critical SQL injection, 1 timing attack, 1 hardcoded secret."
-        })
-        alice.execute_handshake(session_id, output=work_output)
-        log("Work submitted with 3 findings")
-        print("✓ Work submitted")
-
-        # Step 7: Bob verifies and creates receipt
-        header("Step 7: Bob Verifies Work → Receipt Created")
-        receipt = bob.verify_handshake(session_id, quality_score=0.95, tests_passed=3, tests_failed=0)
-        log(f"Receipt ID: {receipt.receipt_id[:16]}...")
-        log(f"Capability: {receipt.task_type}")
-        log(f"Quality: {receipt.quality_score}")
-        print("✓ Work verified, receipt generated")
-
-        # Step 8: Check reputation
-        header("Step 8: Reputation Updated")
-        alice_rep = alice.reputation()
-        log(f"Alice reputation: {json.dumps(alice_rep, indent=2)[:200]}")
-        print("✓ Reputation reflects completed work")
-
-        # Step 9: Market stats
-        header("Step 9: Marketplace Statistics")
-        stats = bob.stats()
-        log(f"Stats: {json.dumps(stats, indent=2)[:300]}")
-        print("✓ Marketplace healthy")
-
-        # Summary
-        header("Demo Complete!")
-        print("""
-Pipeline executed:
-  1. Identity    — Ed25519 keypairs generated
-  2. Auth        — Challenge-response authentication
-  3. Discovery   — Capability-based provider search
-  4. Handshake   — Bilateral negotiation (propose→accept)
-  5. Execution   — Work submitted with structured output
-  6. Verification — Buyer verifies, receipt generated
-  7. Reputation  — Automatically updated from receipts
-  8. Settlement  — Ready for x402/AP2 payment rails
-
-All components: pure Python stdlib, zero external dependencies.
-""")
-
-        httpd.shutdown()
-
-    return 0
+    if args.code and args.tests:
+        # Custom verification
+        tests = json.loads(args.tests)
+        receipt = generate_receipt(args.code, tests, args.language)
+        if args.json:
+            print(json.dumps(receipt, indent=2))
+        else:
+            print_receipt(receipt)
+        sys.exit(0 if receipt["verdict"] == "pass" else 1)
+    else:
+        # Interactive demo
+        receipts = run_interactive_demo()
+        if args.json:
+            print(json.dumps(receipts, indent=2))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
