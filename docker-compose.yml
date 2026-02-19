@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  verify:
+    build: .
+    ports:
+      - "8700:8700"
+    environment:
+      - CLAWBIZARRE_API_KEY=${CLAWBIZARRE_API_KEY:-}
+    volumes:
+      # Persist receipts across restarts
+      - verify-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  verify-data:
