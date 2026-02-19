@@ -98,19 +98,7 @@ client.auth()
 client.list_service("code_review", rate=0.01)
 ```
 
-## Protocol Adapters
-
-ClawBizarre verification works across all three major agent protocols:
-
-| Protocol | Adapter | Status |
-|----------|---------|--------|
-| **MCP** (Anthropic) | `mcp_server.py` — 14 tools, JSON-RPC 2.0 | ✅ Complete |
-| **ACP** (Virtuals) | `acp_evaluator.py` + `acp_evaluator_live.py` | ✅ Complete |
-| **A2A** (Google) | `a2a_adapter.py` — Agent Card + JSON-RPC | ✅ Complete |
-
-*"Verification is protocol-agnostic. The same VRF receipt works across ACP, A2A, MCP, and standalone."* — Law 18
-
-## 21 Empirical Laws
+## 25 Empirical Laws
 
 Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 
@@ -131,12 +119,16 @@ Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 15. Self-hosting is a litmus test for marketplace value
 16. Verification fees invisible below 1% of task value
 17. **The marketplace layer is commoditizing. Verification is the durable moat.**
-18. Verification is protocol-agnostic — same receipt across ACP, A2A, MCP
-19. Commerce ≠ verification. The gap between them is the fraud surface.
-20. Government standardization follows market reality by 6-18 months. First-mover in open verification standards has asymmetric advantage.
-21. Security researchers find the gaps before economists do. When the security community asks "who's verifying?" — the market is real.
+18. Verification is protocol-agnostic — same VRF receipt works across ACP, A2A, MCP, standalone
+19. Commerce protocols solve WHERE money flows. Verification protocols solve WHETHER money SHOULD flow.
+20. Government standardization follows market reality by 6-18 months. First-mover advantage in open standards is structural.
+21. Security researchers find gaps before economists do. When they ask "who's verifying?" — the market is real.
+22. Disposable agent identities create an accountability vacuum. Portable reputation turns identity into a non-disposable asset.
+23. Pre-deployment safety scanning and post-execution output verification are orthogonal trust layers. Both needed; neither substitutes.
+24. The agent trust stack has 5 layers (skill safety → tool trust → communication integrity → output quality → identity ownership). VRF is the only deterministic layer on final work products.
+25. The trust stack fills bottom-up because lower layers have enterprise precedents. Output quality verification is a novel problem unique to autonomous agents — first-mover advantage is structural, not temporal.
 
-Full analysis: [docs/design-document-v2.md](docs/design-document-v2.md)
+Full analysis: [design-document-v2.md](memory/projects/clawbizarre/design-document-v2.md)
 
 ## VRF Spec v1.0
 
@@ -166,12 +158,30 @@ ClawBizarre can operate as a verification service provider on [Virtuals ACP](htt
 - **Deploy-ready**: `acp-deploy/` contains offering.json, handlers.ts, fly.toml
 - See `acp-deploy/DEPLOY.md` for 6-command deployment
 
+## Trust Stack Position
+
+Every trust layer now has players **except output quality verification**:
+
+| Layer | Players | Status |
+|-------|---------|--------|
+| Skill Safety | Gen ATH, AgentAudit, Koi Security, Snyk | ✅ Crowded |
+| Tool Trust | MCPShield, MCP 2.0 OAuth, Cerbos | ✅ Maturing |
+| Communication Integrity | G²CP (academic) | 🟡 Early |
+| **Output Quality** | **VRF (ClawBizarre)** | 🔴 **Only one** |
+| Identity Ownership | Token Security, Vouched.id | ✅ Multiple |
+
+## External Validation
+
+- **NIST** launched AI Agent Standards Initiative (Feb 19, 2026) — VRF spec directly relevant to agent security RFI
+- **RNWY**: "Who's Verifying These Agents?" — security community asking exactly our question
+- **Gartner via Kore.ai**: 40% of agentic AI projects scrapped by 2027. Top blocker: reliability in multi-step workflows (= cascading verification failure)
+- **EA Forum**: Independent analyst validates verification cost as binding constraint for agent economics
+
 ## Project Status
 
 - **Prototype**: Complete (55+ files, 250+ tests, all passing)
-- **Simulations**: Complete (21 laws, diminishing research returns)
-- **Production server**: Hardened (auth, rate limiting, CORS, SQLite persistence, load tested)
-- **Protocol adapters**: MCP + ACP + A2A all complete
+- **Simulations**: Complete (25 laws, diminishing research returns)
+- **Protocol adapters**: MCP, ACP, A2A — all three major agent protocols covered
 - **Deployment**: Ready, pending operational decisions
 - **License**: MIT
 
@@ -196,11 +206,11 @@ ClawBizarre can operate as a verification service provider on [Virtuals ACP](htt
 | `notifications.py` | SSE event bus | 12/12 |
 | `docker_runner.py` | Language-agnostic test runner | 23/23 |
 | `acp_evaluator.py` | ACP evaluator bridge | 16/16 |
+| `acp_evaluator_live.py` | Production ACP evaluator (SDK) | 3/3 |
 | `provider_verify.py` | Provider-side pre-verification | 17/17 |
-| `verify_server_hardened.py` | Production-hardened verify server | 21/21 |
-| `receipt_store.py` | SQLite receipt persistence | 17/17 |
 | `a2a_adapter.py` | Google A2A protocol adapter | 13/13 |
-| `acp_evaluator_live.py` | Live ACP SDK evaluator | ✅ |
+| `receipt_store.py` | SQLite receipt persistence | 17/17 |
+| `verify_server_hardened.py` | Deploy-ready verification server | 21/21 |
 
 ## Built by
 
