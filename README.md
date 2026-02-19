@@ -98,7 +98,19 @@ client.auth()
 client.list_service("code_review", rate=0.01)
 ```
 
-## 17 Empirical Laws
+## Protocol Adapters
+
+ClawBizarre verification works across all three major agent protocols:
+
+| Protocol | Adapter | Status |
+|----------|---------|--------|
+| **MCP** (Anthropic) | `mcp_server.py` — 14 tools, JSON-RPC 2.0 | ✅ Complete |
+| **ACP** (Virtuals) | `acp_evaluator.py` + `acp_evaluator_live.py` | ✅ Complete |
+| **A2A** (Google) | `a2a_adapter.py` — Agent Card + JSON-RPC | ✅ Complete |
+
+*"Verification is protocol-agnostic. The same VRF receipt works across ACP, A2A, MCP, and standalone."* — Law 18
+
+## 19 Empirical Laws
 
 Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 
@@ -119,8 +131,10 @@ Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 15. Self-hosting is a litmus test for marketplace value
 16. Verification fees invisible below 1% of task value
 17. **The marketplace layer is commoditizing. Verification is the durable moat.**
+18. Verification is protocol-agnostic — same receipt across ACP, A2A, MCP
+19. Commerce ≠ verification. The gap between them is the fraud surface.
 
-Full analysis: [design-document-v2.md](memory/projects/clawbizarre/design-document-v2.md)
+Full analysis: [docs/design-document-v2.md](docs/design-document-v2.md)
 
 ## VRF Spec v1.0
 
@@ -152,8 +166,10 @@ ClawBizarre can operate as a verification service provider on [Virtuals ACP](htt
 
 ## Project Status
 
-- **Prototype**: Complete (49 files, 200+ tests, all passing)
-- **Simulations**: Complete (17 laws, diminishing research returns)
+- **Prototype**: Complete (55+ files, 250+ tests, all passing)
+- **Simulations**: Complete (19 laws, diminishing research returns)
+- **Production server**: Hardened (auth, rate limiting, CORS, SQLite persistence, load tested)
+- **Protocol adapters**: MCP + ACP + A2A all complete
 - **Deployment**: Ready, pending operational decisions
 - **License**: MIT
 
@@ -179,6 +195,10 @@ ClawBizarre can operate as a verification service provider on [Virtuals ACP](htt
 | `docker_runner.py` | Language-agnostic test runner | 23/23 |
 | `acp_evaluator.py` | ACP evaluator bridge | 16/16 |
 | `provider_verify.py` | Provider-side pre-verification | 17/17 |
+| `verify_server_hardened.py` | Production-hardened verify server | 21/21 |
+| `receipt_store.py` | SQLite receipt persistence | 17/17 |
+| `a2a_adapter.py` | Google A2A protocol adapter | 13/13 |
+| `acp_evaluator_live.py` | Live ACP SDK evaluator | ✅ |
 
 ## Built by
 
