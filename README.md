@@ -128,6 +128,22 @@ VRF plugs into every major agent framework — because output verification is fr
 
 All built on shared `vrf-client` (44/44 tests). Microsoft Agent Framework (NuGet) planned.
 
+## Auto-Test Generation
+
+Don't have test suites? Describe what the code should do and VRF generates them:
+
+```bash
+curl -X POST https://verify.clawbizarre.com/test-gen/verify \
+  -d '{
+    "code": "def fibonacci(n): ...",
+    "task_description": "Return the nth Fibonacci number (0-indexed)",
+    "coverage": "standard"
+  }'
+# → Generates 8-12 tests from description, runs them, returns VRF receipt
+```
+
+LLM generates tests (subjective), sandbox executes tests (deterministic). Clean separation.
+
 ## GitHub Action
 
 ```yaml
@@ -140,7 +156,7 @@ All built on shared `vrf-client` (44/44 tests). Microsoft Agent Framework (NuGet
 
 Zero-dependency composite action. Adds PASS/FAIL badge to GitHub Step Summary.
 
-## 41 Empirical Laws
+## 47 Empirical Laws
 
 Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 
@@ -185,8 +201,14 @@ Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 39. Zero-config first integration captures 80% of users. Every additional config step halves addressable market.
 40. The verification gap is framework-universal. ALL five major agent frameworks solve orchestration; NONE solve output verification.
 41. A single verification protocol serves all frameworks.
+42. Outcome-based SLAs require deterministic evidence, not probabilistic assessment. VRF receipts convert "the agent succeeded" from a claim into a proof.
+43. *(reserved)*
+44. *(reserved)*
+45. The test suite is the contract. Auto-generating tests from task descriptions converts natural language intent into deterministic acceptance criteria.
+46. Verifiable execution (EigenAI/TEE) and verifiable correctness (VRF) are complementary but irreducible. A correctly executed wrong answer is still wrong.
+47. 69% of agentic AI decisions require human review. Deterministic output verification gives humans evidence instead of raw outputs.
 
-Full analysis: [design-document-v2.md](memory/projects/clawbizarre/design-document-v2.md)
+Full analysis: [design-document-v3.md](docs/design-document-v3.md)
 
 ## VRF Spec v1.0
 
@@ -228,6 +250,8 @@ Every trust layer now has players **except output quality verification**:
 | **Output Quality** | **VRF (ClawBizarre)** | 🔴 **Only one** |
 | Identity Ownership | Token Security, Vouched.id | ✅ Multiple |
 
+Full taxonomy: [trust-stack-taxonomy.md](docs/trust-stack-taxonomy.md)
+
 ## Regulatory & Standards Alignment
 
 - **EU AI Act**: Main provisions enforceable August 2, 2026. High-risk AI must verify outputs. Max penalty: €35M / 7% revenue. No standard for HOW — VRF fills this.
@@ -249,7 +273,7 @@ Every trust layer now has players **except output quality verification**:
 ## Project Status
 
 - **Prototype**: Complete (60+ files, 300+ tests, all passing)
-- **Simulations**: Complete (41 laws from 10 economic simulations)
+- **Simulations**: Complete (47 laws from 10 economic simulations)
 - **Protocol adapters**: MCP, ACP, A2A — all three major agent protocols covered
 - **Framework integrations**: LangChain, CrewAI, OpenAI, standalone (44/44 tests)
 - **SCITT/COSE**: Full transparency stack (Merkle tree, COSE Sign1, Internet-Draft)
@@ -293,6 +317,7 @@ Every trust layer now has players **except output quality verification**:
 | `integrations/langchain_vrf.py` | LangChain/LangGraph integration | 16/16 |
 | `integrations/crewai_vrf.py` | CrewAI integration | 8/8 |
 | `integrations/openai_vrf.py` | OpenAI Assistants/Swarm integration | 7/7 |
+| `test_gen.py` | LLM-powered auto-test generation | 14/14 |
 
 ## SCITT Alignment & IETF Internet-Draft
 

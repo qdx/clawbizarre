@@ -1,0 +1,213 @@
+name: 'VRF Verify Agent Output'
+description: 'Verify agent-generated code with deterministic test suites. Optionally auto-generate tests from task descriptions.'
+author: 'ClawBizarre'
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  code:
+    description: 'The code/output to verify'
+    required: true
+  test_suite:
+    description: 'JSON test suite (array of test objects with input/expected fields). If omitted, task_description is required for auto-generation.'
+    required: false
+  task_description:
+    description: 'Natural language task description. Used to auto-generate test suite when test_suite is not provided. Requires OPENAI_API_KEY.'
+    required: false
+  coverage:
+    description: 'Auto-generation coverage level: basic (3-5), standard (8-12), thorough (15-25)'
+    required: false
+    default: 'standard'
+  language:
+    description: 'Programming language (python, javascript, bash)'
+    required: false
+    default: 'python'
+  verify_url:
+    description: 'VRF verify server URL'
+    required: false
+    default: 'http://localhost:8880'
+  use_docker:
+    description: 'Use Docker sandboxing for execution'
+    required: false
+    default: 'false'
+  fail_on_reject:
+    description: 'Fail the action if verification verdict is FAIL'
+    required: false
+    default: 'true'
+
+outputs:
+  verdict:
+    description: 'PASS or FAIL'
+  receipt:
+    description: 'Full VRF receipt JSON'
+  receipt_id:
+    description: 'Unique receipt ID'
+  tests_passed:
+    description: 'Number of tests passed'
+  tests_total:
+    description: 'Total number of tests'
+  test_suite:
+    description: 'The test suite used (useful when auto-generated)'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify agent output
+      id: verify
+      shell: bash
+      env:
+        VRF_CODE: ${{ inputs.code }}
+        VRF_TEST_SUITE: ${{ inputs.test_suite }}
+        VRF_TASK_DESC: ${{ inputs.task_description }}
+        VRF_COVERAGE: ${{ inputs.coverage }}
+        VRF_LANGUAGE: ${{ inputs.language }}
+        VRF_VERIFY_URL: ${{ inputs.verify_url }}
+        VRF_USE_DOCKER: ${{ inputs.use_docker }}
+        VRF_FAIL_ON_REJECT: ${{ inputs.fail_on_reject }}
+        OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
+      run: |
+        # Build verification request (inputs via env vars, not string interpolation)
+        PAYLOAD=$(python3 -c "
+        import json, sys, os
+        from urllib.request import Request, urlopen
+
+        code = os.environ['VRF_CODE']
+        test_suite_raw = os.environ.get('VRF_TEST_SUITE', '')
+        task_desc = os.environ.get('VRF_TASK_DESC', '')
+        coverage = os.environ.get('VRF_COVERAGE', 'standard')
+        language = os.environ.get('VRF_LANGUAGE', 'python')
+        use_docker = os.environ.get('VRF_USE_DOCKER', 'false').lower() == 'true'
+
+        # Determine test suite
+        if test_suite_raw.strip():
+            try:
+                tests = json.loads(test_suite_raw)
+            except json.JSONDecodeError:
+                print('ERROR: test_suite must be valid JSON', file=sys.stderr)
+                sys.exit(1)
+            test_suite = {'tests': tests, 'language': language}
+        elif task_desc.strip():
+            # Auto-generate tests via OpenAI
+            api_key = os.environ.get('OPENAI_API_KEY', '')
+            if not api_key:
+                print('ERROR: OPENAI_API_KEY required for auto-test-generation', file=sys.stderr)
+                sys.exit(1)
+            model = os.environ.get('VRF_TESTGEN_MODEL', 'gpt-4o-mini')
+
+            coverage_specs = {
+                'basic': '3-5', 'standard': '8-12', 'thorough': '15-25'
+            }
+            test_count = coverage_specs.get(coverage, '8-12')
+
+            prompt = f'''Generate a test suite for this task. Return ONLY a JSON array of test objects.
+        Each test: {{\"input\": \"expression_to_test\", \"expected\": \"expected_output\"}}
+        The input field should be a valid {language} expression that calls the function/code.
+        The expected field should be the string representation of the expected return value.
+        Generate {test_count} tests covering: happy path, edge cases, boundary values.
+        Do NOT include tests that expect exceptions.
+
+        Task: {task_desc}
+        Language: {language}'''
+
+            req_body = json.dumps({
+                'model': model, 'temperature': 0.2,
+                'messages': [{'role': 'user', 'content': prompt}]
+            }).encode()
+            req = Request('https://api.openai.com/v1/chat/completions',
+                          data=req_body,
+                          headers={'Content-Type': 'application/json',
+                                   'Authorization': f'Bearer {api_key}'})
+            try:
+                with urlopen(req, timeout=60) as resp:
+                    result = json.loads(resp.read())
+                content = result['choices'][0]['message']['content']
+                # Extract JSON array from response
+                import re
+                match = re.search(r'\[.*\]', content, re.DOTALL)
+                if match:
+                    tests = json.loads(match.group())
+                else:
+                    print('ERROR: Could not parse test suite from LLM response', file=sys.stderr)
+                    sys.exit(1)
+                # Write generated suite to stderr for debugging
+                print(f'Auto-generated {len(tests)} tests from task description', file=sys.stderr)
+            except Exception as e:
+                print(f'ERROR: Test generation failed: {e}', file=sys.stderr)
+                sys.exit(1)
+            test_suite = {'tests': tests, 'language': language}
+        else:
+            print('ERROR: Either test_suite or task_description must be provided', file=sys.stderr)
+            sys.exit(1)
+
+        request = {
+            'tier': 0,
+            'output': {'content': code},
+            'verification': {
+                'test_suite': test_suite,
+                'use_docker': use_docker
+            }
+        }
+        # Output the test suite for the output variable
+        print(json.dumps(test_suite), file=sys.stderr)
+        print(json.dumps(request))
+        ")
+
+        if [ $? -ne 0 ]; then
+          echo "::error::Failed to build verification request"
+          exit 1
+        fi
+
+        # Call verify server
+        RESPONSE=$(curl -s -X POST \
+          "${VRF_VERIFY_URL}/verify" \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD" \
+          --max-time 30)
+
+        if [ $? -ne 0 ]; then
+          echo "::error::Failed to reach VRF verify server at ${VRF_VERIFY_URL}"
+          exit 1
+        fi
+
+        # Parse response
+        VERDICT=$(echo "$RESPONSE" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r.get('verdict','ERROR'))")
+        RECEIPT_ID=$(echo "$RESPONSE" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r.get('receipt_id','unknown'))")
+        PASSED=$(echo "$RESPONSE" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r.get('test_results',{}).get('passed',0))")
+        TOTAL=$(echo "$RESPONSE" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r.get('test_results',{}).get('total',0))")
+
+        echo "verdict=$VERDICT" >> $GITHUB_OUTPUT
+        echo "receipt_id=$RECEIPT_ID" >> $GITHUB_OUTPUT
+        echo "tests_passed=$PASSED" >> $GITHUB_OUTPUT
+        echo "tests_total=$TOTAL" >> $GITHUB_OUTPUT
+
+        # Save full receipt as multiline output
+        {
+          echo "receipt<<EOF"
+          echo "$RESPONSE"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+
+        # Summary
+        {
+          echo "### VRF Verification Result"
+          echo ""
+          if [ "$VERDICT" = "PASS" ]; then
+            echo "✅ **PASS** — ${PASSED}/${TOTAL} tests passed"
+          else
+            echo "❌ **FAIL** — ${PASSED}/${TOTAL} tests passed"
+          fi
+          echo ""
+          echo "Receipt ID: \`${RECEIPT_ID}\`"
+          if [ -n "${VRF_TASK_DESC}" ]; then
+            echo ""
+            echo "_Tests auto-generated from task description (${VRF_COVERAGE} coverage)_"
+          fi
+        } >> $GITHUB_STEP_SUMMARY
+
+        # Fail if configured
+        if [ "$VERDICT" != "PASS" ] && [ "$VRF_FAIL_ON_REJECT" = "true" ]; then
+          echo "::error::VRF verification failed: ${PASSED}/${TOTAL} tests passed"
+          exit 1
+        fi

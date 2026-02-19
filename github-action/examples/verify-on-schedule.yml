@@ -1,0 +1,62 @@
+# Example: Scheduled verification of agent-maintained services
+#
+# Run nightly VRF verification against agent-maintained code to catch
+# regressions. Receipts accumulate into an audit trail for compliance.
+
+name: Nightly Agent Verification
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2 AM UTC daily
+  workflow_dispatch:      # Manual trigger
+
+jobs:
+  verify-all:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - name: parser
+            file: src/parser.py
+            tests: tests/parser_vrf.json
+            lang: python
+          - name: formatter
+            file: src/formatter.js
+            tests: tests/formatter_vrf.json
+            lang: javascript
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start VRF server
+        run: |
+          docker run -d -p 8880:8880 ghcr.io/clawbizarre/verify-server:latest
+          sleep 2
+
+      - name: Verify ${{ matrix.module.name }}
+        id: verify
+        uses: ./github-action
+        with:
+          code: ${{ github.workspace }}/${{ matrix.module.file }}
+          test_suite: ${{ github.workspace }}/${{ matrix.module.tests }}
+          language: ${{ matrix.module.lang }}
+          fail_on_reject: 'false'  # Don't fail nightly, just report
+
+      - name: Store receipt
+        run: |
+          mkdir -p receipts/$(date +%Y-%m-%d)
+          echo '${{ steps.verify.outputs.receipt }}' > \
+            receipts/$(date +%Y-%m-%d)/${{ matrix.module.name }}.json
+
+      - name: Commit receipts
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "vrf: nightly verification ${{ matrix.module.name }} (${{ steps.verify.outputs.verdict }})"
+          file_pattern: 'receipts/**'
+
+      # Alert on failure
+      - name: Alert on FAIL
+        if: steps.verify.outputs.verdict == 'FAIL'
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {"text": "⚠️ VRF FAIL: ${{ matrix.module.name }} — ${{ steps.verify.outputs.tests_passed }}/${{ steps.verify.outputs.tests_total }} tests passed"}
