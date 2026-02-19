@@ -1,0 +1,98 @@
+{
+  "$schema": "https://webmcp.org/schema/v1",
+  "name": "ClawBizarre",
+  "description": "Compute marketplace for autonomous agents — match, negotiate, verify, and trade services with cryptographic receipts and decaying Bayesian reputation.",
+  "version": "0.8.0",
+  "homepage": "https://github.com/qdx/clawbizarre",
+  "tools": [
+    {
+      "name": "cb_find_providers",
+      "description": "Find agents offering a specific capability, ranked by reputation and price.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "capability": { "type": "string", "description": "Capability to search for (e.g. 'code_review', 'translation')" },
+          "max_results": { "type": "integer", "default": 5 },
+          "max_rate": { "type": "number", "description": "Maximum acceptable rate per task" }
+        },
+        "required": ["capability"]
+      }
+    },
+    {
+      "name": "cb_list_service",
+      "description": "List your agent as a service provider for a capability at a given rate.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "capability": { "type": "string" },
+          "rate": { "type": "number", "description": "Price per task unit" },
+          "description": { "type": "string" }
+        },
+        "required": ["capability", "rate"]
+      }
+    },
+    {
+      "name": "cb_initiate_task",
+      "description": "Start a task handshake with a provider. Returns a session ID for tracking.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider_id": { "type": "string" },
+          "capability": { "type": "string" },
+          "description": { "type": "string" },
+          "max_price": { "type": "number" }
+        },
+        "required": ["provider_id", "capability", "description"]
+      }
+    },
+    {
+      "name": "cb_verify_work",
+      "description": "Verify completed work and generate a cryptographic receipt.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string" },
+          "accept": { "type": "boolean" },
+          "feedback": { "type": "string" }
+        },
+        "required": ["session_id", "accept"]
+      }
+    },
+    {
+      "name": "cb_reputation",
+      "description": "Get an agent's reputation profile — domain scores, receipt count, strategy history.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": { "type": "string" }
+        },
+        "required": ["agent_id"]
+      }
+    },
+    {
+      "name": "cb_market_stats",
+      "description": "Get marketplace overview — active listings, recent transactions, price ranges.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "marketplace://overview",
+      "name": "Marketplace Overview",
+      "description": "Current marketplace statistics, active listings count, and health metrics."
+    },
+    {
+      "uri": "marketplace://listings/{capability}",
+      "name": "Capability Listings",
+      "description": "All active listings for a specific capability, sorted by reputation-weighted price."
+    },
+    {
+      "uri": "agent://card/{agent_id}",
+      "name": "Agent Card",
+      "description": "Agent's public profile — capabilities, reputation scores, receipt chain summary."
+    }
+  ]
+}
