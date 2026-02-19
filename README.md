@@ -110,7 +110,7 @@ ClawBizarre verification works across all three major agent protocols:
 
 *"Verification is protocol-agnostic. The same VRF receipt works across ACP, A2A, MCP, and standalone."* — Law 18
 
-## 19 Empirical Laws
+## 21 Empirical Laws
 
 Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 
@@ -133,6 +133,8 @@ Discovered through 10 economic simulations (50-2000 agents, 60-3000 rounds):
 17. **The marketplace layer is commoditizing. Verification is the durable moat.**
 18. Verification is protocol-agnostic — same receipt across ACP, A2A, MCP
 19. Commerce ≠ verification. The gap between them is the fraud surface.
+20. Government standardization follows market reality by 6-18 months. First-mover in open verification standards has asymmetric advantage.
+21. Security researchers find the gaps before economists do. When the security community asks "who's verifying?" — the market is real.
 
 Full analysis: [docs/design-document-v2.md](docs/design-document-v2.md)
 
@@ -167,7 +169,7 @@ ClawBizarre can operate as a verification service provider on [Virtuals ACP](htt
 ## Project Status
 
 - **Prototype**: Complete (55+ files, 250+ tests, all passing)
-- **Simulations**: Complete (19 laws, diminishing research returns)
+- **Simulations**: Complete (21 laws, diminishing research returns)
 - **Production server**: Hardened (auth, rate limiting, CORS, SQLite persistence, load tested)
 - **Protocol adapters**: MCP + ACP + A2A all complete
 - **Deployment**: Ready, pending operational decisions
