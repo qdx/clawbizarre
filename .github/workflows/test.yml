@@ -1,0 +1,93 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install COSE dependencies (optional, for SCITT tests)
+        run: pip install pycose cbor2 || true
+
+      - name: Run core protocol tests
+        run: |
+          set -e
+          echo "=== Identity ==="
+          python3 prototype/identity.py
+          echo "=== Receipt ==="
+          python3 prototype/receipt.py
+          echo "=== Handshake ==="
+          python3 prototype/handshake.py
+          echo "=== Signed Handshake ==="
+          python3 prototype/signed_handshake.py
+          echo "=== Reputation ==="
+          python3 prototype/reputation.py
+          echo "=== Discovery ==="
+          python3 prototype/discovery.py
+          echo "=== Treasury ==="
+          python3 prototype/treasury.py
+          echo "=== Aggregator ==="
+          python3 prototype/aggregator.py
+          echo "=== Matching ==="
+          python3 prototype/matching.py
+          echo "=== Notifications ==="
+          python3 prototype/notifications.py
+          echo "=== Auth ==="
+          python3 prototype/auth.py
+          echo "=== Persistence ==="
+          python3 prototype/persistence.py
+          echo "=== Receipt Store ==="
+          python3 prototype/receipt_store.py
+
+      - name: Run server tests
+        run: |
+          set -e
+          echo "=== Verify Server Hardened ==="
+          python3 prototype/verify_server_hardened.py
+          echo "=== Verify Server Unified ==="
+          python3 prototype/verify_server_unified.py
+
+      - name: Run MCP tests
+        run: |
+          set -e
+          echo "=== MCP Server ==="
+          python3 prototype/mcp_server.py
+
+      - name: Run integration tests
+        run: |
+          set -e
+          echo "=== VRF Client ==="
+          python3 prototype/integrations/vrf_client.py
+          echo "=== LangChain VRF ==="
+          python3 prototype/integrations/langchain_vrf.py
+          echo "=== CrewAI VRF ==="
+          python3 prototype/integrations/crewai_vrf.py
+          echo "=== OpenAI VRF ==="
+          python3 prototype/integrations/openai_vrf.py
+
+      - name: Run COSE/SCITT tests (optional)
+        continue-on-error: true
+        run: |
+          echo "=== VRF COSE ==="
+          python3 prototype/vrf_cose.py
+          echo "=== Merkle ==="
+          python3 prototype/merkle.py
+          echo "=== Merkle Store ==="
+          python3 prototype/merkle_store.py
+          echo "=== VRF COSE Identity ==="
+          python3 prototype/vrf_cose_identity.py
