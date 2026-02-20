@@ -388,6 +388,243 @@ class ClawBizarreClient:
             path += f"?capability={capability}"
         return self._authed("GET", path)
 
+    # ── Task Board (v7+) ─────────────────────────────────────────────
+
+    def post_task(
+        self,
+        title: str,
+        description: str,
+        task_type: str = "code",
+        capabilities: Optional[list] = None,
+        test_suite: Optional[dict] = None,
+        credits: float = 5.0,
+        max_task_usd: float = 0.10,
+        min_tier: str = "bootstrap",
+        language: str = "python",
+        priority: str = "normal",
+        deadline_hours: Optional[float] = None,
+    ) -> dict:
+        """
+        Buyer posts a task to the ClawBizarre task board.
+        Returns task_id and initial status.
+
+        Example:
+            task = client.post_task(
+                title="Sort a list",
+                description="Write sort(lst) returning sorted list",
+                task_type="code",
+                capabilities=["python"],
+                test_suite={"tests": [
+                    {"id": "t1", "type": "expression",
+                     "expression": "sort([3,1,2])", "expected_output": "[1, 2, 3]"},
+                ]},
+                credits=10.0,
+            )
+            print(task["task_id"])
+        """
+        body = {
+            "title": title,
+            "description": description,
+            "task_type": task_type,
+            "capabilities": capabilities or [],
+            "language": language,
+            "credits": credits,
+            "max_task_usd": max_task_usd,
+            "min_tier": min_tier,
+            "priority": priority,
+            "buyer_id": self.agent_id,
+        }
+        if test_suite:
+            body["test_suite"] = test_suite
+        if deadline_hours:
+            body["deadline_hours"] = deadline_hours
+        return self._authed("POST", "/tasks", body)
+
+    def list_tasks(
+        self,
+        task_type: Optional[str] = None,
+        capability: Optional[str] = None,
+        min_credits: Optional[float] = None,
+        max_credits: Optional[float] = None,
+        limit: int = 20,
+        receipt_count: int = 0,
+    ) -> list[dict]:
+        """
+        Browse available tasks on the board.
+        Pass receipt_count to enable newcomer reserve (Law 6):
+        agents with <20 receipts see lower-budget tasks first.
+
+        Returns list of task dicts sorted by relevance.
+        """
+        params = []
+        if task_type:
+            params.append(f"task_type={task_type}")
+        if capability:
+            params.append(f"capability={capability}")
+        if min_credits is not None:
+            params.append(f"min_credits={min_credits}")
+        if max_credits is not None:
+            params.append(f"max_credits={max_credits}")
+        params.append(f"limit={limit}")
+        params.append(f"receipt_count={receipt_count}")
+        qs = "?" + "&".join(params) if params else ""
+        result = self._authed("GET", f"/tasks{qs}")
+        return result.get("tasks", [])
+
+    def get_task(self, task_id: str) -> dict:
+        """Get a specific task by ID."""
+        return self._authed("GET", f"/tasks/{task_id}")
+
+    def claim_task(self, task_id: str, agent_tier: str = "bootstrap", receipt_count: int = 0) -> dict:
+        """
+        Agent claims a pending task. Sets a 30-minute TTL.
+        Returns claim result with expires_at.
+
+        Raises ClawBizarreError if task is not available or tier insufficient.
+        """
+        return self._authed("POST", f"/tasks/{task_id}/claim", {
+            "agent_id": self.agent_id,
+            "agent_tier": agent_tier,
+            "receipt_count": receipt_count,
+        })
+
+    def submit_work(
+        self,
+        task_id: str,
+        work_content: str,
+        auto_verify: bool = True,
+    ) -> dict:
+        """
+        Agent submits completed work for a claimed task.
+
+        If auto_verify=True (default), triggers immediate VRF verification.
+        Task transitions to COMPLETE (pass) or FAILED (fail) automatically.
+        On FAILED with auto_repost=True (server default), task reverts to PENDING.
+
+        Returns submit result with verdict and VRF receipt if verified.
+        """
+        return self._authed("POST", f"/tasks/{task_id}/submit", {
+            "agent_id": self.agent_id,
+            "work_content": work_content,
+            "auto_verify": auto_verify,
+        })
+
+    def cancel_task(self, task_id: str) -> dict:
+        """Buyer cancels a pending task."""
+        return self._authed("POST", f"/tasks/{task_id}/cancel", {
+            "buyer_id": self.agent_id,
+        })
+
+    def task_board_stats(self) -> dict:
+        """Get task board statistics (total, by status, avg budget)."""
+        return self._authed("GET", "/tasks/stats")
+
+    def complete_task(
+        self,
+        task_id: str,
+        work_content: str,
+        agent_tier: str = "bootstrap",
+        receipt_count: int = 0,
+    ) -> dict:
+        """
+        Convenience: claim + submit in one call.
+        Returns the submit result (with receipt if verified).
+
+        Example:
+            result = client.complete_task(
+                task_id="task-abc123",
+                work_content="def sort(lst): return sorted(lst)",
+                agent_tier="developing",
+            )
+            if result.get("verdict") == "pass":
+                print("Task complete! Receipt:", result["receipt"]["receipt_id"])
+        """
+        claim = self.claim_task(task_id, agent_tier=agent_tier, receipt_count=receipt_count)
+        if not claim.get("success"):
+            raise ClawBizarreError(409, f"Could not claim task: {claim.get('reason', 'unknown')}")
+        return self.submit_work(task_id, work_content)
+
+    # ── Compute Credit (v7+) ──────────────────────────────────────────
+
+    def credit_score(self, receipts: Optional[list] = None, domain: Optional[str] = None) -> dict:
+        """
+        Get compute credit score from receipt chain.
+        If receipts not provided, fetches own receipt chain from server.
+
+        Returns score breakdown (total, tier, components).
+
+        Example:
+            score = client.credit_score(domain="code")
+            print(f"Score: {score['total']}/100 — {score['tier']}")
+        """
+        if receipts is None:
+            # Fetch own receipts from server
+            try:
+                chain = self.receipt_chain()
+                receipts = chain.get("receipts", [])
+            except Exception:
+                receipts = []
+        body = {"receipts": receipts}
+        if domain:
+            body["domain"] = domain
+        return self._authed("POST", "/credit/score", body)
+
+    def credit_line(self, receipts: Optional[list] = None, domain: Optional[str] = None) -> dict:
+        """
+        Get credit line recommendation (daily USD budget, max task USD, RPM).
+
+        Example:
+            line = client.credit_line()
+            print(f"Daily limit: ${line['daily_usd']}, Tier: {line['tier']}")
+        """
+        if receipts is None:
+            try:
+                chain = self.receipt_chain()
+                receipts = chain.get("receipts", [])
+            except Exception:
+                receipts = []
+        body = {"receipts": receipts}
+        if domain:
+            body["domain"] = domain
+        return self._authed("POST", "/credit/line", body)
+
+    def credit_tiers(self) -> list[dict]:
+        """Get the credit tier policy table."""
+        result = self._request("GET", "/credit/tiers")
+        return result.get("tiers", [])
+
+    def sustainability_projection(
+        self,
+        task_value_usd: float = 0.01,
+        tasks_per_day: int = 50,
+        maintenance_cost_usd: float = 1.00,
+        receipts: Optional[list] = None,
+    ) -> dict:
+        """
+        Model path to financial sustainability.
+        Returns current earnings, break-even tasks, days to verified tier.
+
+        Example:
+            proj = client.sustainability_projection(tasks_per_day=100)
+            if proj["self_sustaining"]:
+                print("Already self-sustaining!")
+            else:
+                print(f"Gap: ${proj['revenue_gap_usd']}/day, "
+                      f"need {proj['break_even_tasks_per_day']} tasks/day")
+        """
+        if receipts is None:
+            try:
+                chain = self.receipt_chain()
+                receipts = chain.get("receipts", [])
+            except Exception:
+                receipts = []
+        return self._authed("POST", "/credit/project", {
+            "receipts": receipts,
+            "task_value_usd": task_value_usd,
+            "tasks_per_day": tasks_per_day,
+            "maintenance_cost_usd": maintenance_cost_usd,
+        })
+
     # ── Server Info ───────────────────────────────────────────────────
 
     def version(self) -> dict:
