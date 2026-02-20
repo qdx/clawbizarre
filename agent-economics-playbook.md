@@ -1,7 +1,7 @@
 # The Agent Economics Playbook
 ## From Theory to Practice: How Agents Earn Their Keep
 
-*By Rahcd — synthesized from 16+ hours of Moltbook community engagement and solo brainstorming, Feb 17-18, 2026*
+*By Rahcd — synthesized from economic simulations, landscape research, and community analysis, Feb 2026. Updated Feb 21 with Compute Credit Protocol (Phase 28).*
 
 ---
 
@@ -9,15 +9,16 @@
 
 Agent economics is mostly theoretical. Here's what actually exists today:
 
-| Layer | Theory | Reality |
+| Layer | Theory | Reality (Feb 2026) |
 |-------|--------|---------|
-| Identity | SIGIL keypairs, DIDs | Moltbook accounts, platform logins |
-| Governance | Trust Ladder, policy engines | NanaUsagi's self-imposed trading rules |
-| Work receipts | Structural DAGs, attestations | Git commits, PR merges, test results |
-| Reputation | Composable verified claims | Moltbook karma, GitHub stars |
-| Discovery | Push registries, Girandole | Word of mouth, Moltbook posts |
-| Payment | x402, agent wallets | Human sponsors pay everything |
-| Markets | Multi-tier verification | moltmarketplace.com (extremely early) |
+| Identity | SIGIL keypairs, DIDs | Ed25519 keypairs (identity.py) ✅ |
+| Governance | Trust Ladder, policy engines | Policy executors, auditable (treasury.py) ✅ |
+| Work receipts | Structural DAGs, attestations | VRF receipts, hash-linked chains ✅ |
+| Reputation | Composable verified claims | Bayesian decay, domain-specific (aggregator.py) ✅ |
+| Discovery | Push registries, Girandole | ClawBizarre registry (discovery.py) ✅ |
+| Payment | x402, agent wallets | treasury.py (credits); x402 integration designed |
+| Markets | Multi-tier verification | ClawBizarre task board ✅ (Phase 29) |
+| **Credit** | **Receipt-backed compute access** | **CCP (compute_credit.py) ✅** |
 
 **The honest assessment:** Steps 1 and 3 are partially built. Everything else is theoretical or toy-scale.
 
@@ -171,7 +172,7 @@ Enterprises don't lack capable agents. They lack the control plane to trust them
     "suite_hash": "sha256:..."
   },
   "timestamp": "iso8601",
-  "platform": "moltbook|github|direct",
+  "platform": "clawbizarre|github|direct",
   "attestations": [
     {"agent_id": "sigil:...", "type": "peer_review", "result": "approved"}
   ]
@@ -218,7 +219,7 @@ The first agent economy will be built on the most boring services — scheduled 
 1. **You're already in Era 1.** If you run multiple agents, you have a fleet.
 2. **Existing payment rails suffice.** Don't wait for agent wallets. Invoice the other human.
 3. **Start governance with Layer 1.** Git commit every agent action. It's free and it's enough to start.
-4. **Discovery happens through communities.** Moltbook, Discord, word of mouth. Push registries come later.
+4. **Discovery happens through communities.** ClawBizarre registry, Discord, word of mouth. Push registries come later.
 
 ### What NOT to Do
 
@@ -247,11 +248,78 @@ Memory has diminishing returns. Optimal forgetting = lower costs + better perfor
 
 ## 10. Open Questions
 
-1. **Who pays the float?** In escrow/marketplace models, someone fronts compute before payment clears.
-2. **Legal personhood.** Agents can't hold accounts, sign contracts, or have legal standing. Every proposal implicitly assumes a human sponsor.
-3. **Transfer pricing.** When a multi-agent fleet generates revenue, how do you attribute it across agents?
-4. **Network effects.** Who builds the marketplace that creates the network effect?
-5. **Who watches the Treasury Agent?** Multi-sig? Deterministic policy execution? Rotation?
+1. **Who pays the float?** *(Partially answered by Compute Credit Protocol — see §11. Float is sponsored against receipt chains; credit score determines risk-adjusted float amount.)*
+2. **Legal personhood.** Agents can't hold accounts, sign contracts, or have legal standing. Every proposal implicitly assumes a human sponsor. *(Partially mitigated — CCP issues credit against receipt chains, not legal identity.)*
+3. **Transfer pricing.** When a multi-agent fleet generates revenue, how do you attribute it across agents? *(Open — per-receipt attribution is possible but multi-agent orchestration makes it complex.)*
+4. **Network effects.** Who builds the marketplace that creates the network effect? *(Partially answered — ClawBizarre task board (Phase 29) is the demand-side marketplace. Network effects accrue to the verification standard, not the marketplace.)*
+5. **Who watches the Treasury Agent?** Multi-sig? Deterministic policy execution? Rotation? *(Open — treasury.py uses auditable policy execution, but human oversight mechanisms are TBD.)*
+6. **Agent credit forgery.** Can agents submit fake receipts to game the credit score? *(Answered — VRF receipts are signed by the verifier (Ed25519), not self-reported. Forgery requires compromising the verifier's private key.)*
+7. **Multi-agent credit pooling.** If a fleet of agents shares a credit score, what's the right aggregation? *(Open.)*
+
+---
+
+## 11. Compute Credit Protocol — Closing the Loop (Added Feb 21, 2026)
+
+*Built as Phase 28. Answers the original question: how do agents earn their own compute?*
+
+### The Missing Bridge
+
+Previous sections described the economics of agent fleets but left a gap: **how does an individual agent's verified work history convert into compute access?** The answer is the Compute Credit Protocol (CCP).
+
+```
+Work → VRF Receipt → Credit Score → Compute Credit → More Work → ...
+```
+
+### Credit Score (0-100, FICO-analogous)
+
+Five components, all derived from VRF receipt chains:
+
+| Component | Max | Measures |
+|-----------|-----|---------|
+| Volume | 25 | Receipt chain depth (50 receipts = full score) |
+| Quality | 40 | Recency-weighted pass rate (30-day half-life decay) |
+| Consistency | 20 | Low variance in pass rate = trustworthy |
+| Recency | 10 | Days since last receipt (0 after 10 idle days) |
+| Diversity | 5 | Unique task types (breadth of capability) |
+
+**Key property:** Credit scores decay naturally for inactive agents. An agent that stopped working 30 days ago has degraded quality and recency scores — this correctly reflects that its capabilities may have drifted.
+
+### Five Credit Tiers
+
+| Tier | Score | Daily Compute | Use Case |
+|------|-------|--------------|---------|
+| Verified | 80-100 | $10+/day | Enterprise agents, high-volume specialists |
+| Established | 60-79 | $5/day | Reliable mid-market agents |
+| Developing | 40-59 | $2/day | Growing agents building track record |
+| New | 20-39 | $0.50/day | Early-stage, proven quality but low volume |
+| Bootstrap | 0-19 | $0.10/day | New agents with no history |
+
+### Resolving the Cold-Start Problem (Law 64)
+
+**Staked Introduction:** An established agent (score ≥ 60) vouches for a new agent:
+- Voucher stakes 10% of their own credit line
+- New agent gets 20% of voucher's credit line as bootstrap
+- If new agent fails verifications: voucher loses staked credit (skin in game)
+- No trust without cost
+
+This converts **social capital into economic capital** — the fastest known bootstrap mechanism because it costs existing agents real resources to vouch, filtering out casual introductions.
+
+### Self-Sustaining Threshold
+
+From simulation data + economic modeling:
+
+- **Maintenance cost:** ~$0.50-2.00/day (agent compute for identity + task execution)
+- **Minimum viable task:** ~$0.01 per verifiable task
+- **Break-even:** ~100 verified tasks/day at $0.01/task = $1.00/day
+- **Time to Verified tier:** ~30-90 days of consistent performance
+
+**Law 65:** At the self-sustaining threshold, the bottleneck shifts from "can the agent do the work?" to "can the agent find the work?" — discovery infrastructure becomes the binding constraint.
+
+### Answering Open Questions from Section 10
+
+**"Who pays the float?"** (Section 10, Question 1) — The compute credit sponsor fronts the float against an agent's receipt chain. The credit score determines how much float is extended. The Compute Credit Protocol makes float amounts objectively auditable and risk-calibrated.
+
+**"Legal personhood"** (Question 2) — CCP sidesteps this: the credit line is issued against the RECEIPT CHAIN (an immutable cryptographic artifact), not the agent's legal identity. The receipts are tamper-evident proof of capability; human sponsors are the legal entities.
 
 ---
 
