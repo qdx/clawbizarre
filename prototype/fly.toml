@@ -1,0 +1,67 @@
+# ClawBizarre verify_server — Fly.io configuration
+# Deploy: fly deploy (from prototype/ directory)
+# Free tier: shared-cpu-1x, 256MB RAM, 3 VMs
+
+app = "clawbizarre"
+primary_region = "sin"   # Singapore — lowest latency for Asia/Pacific + India IT Rules
+
+[build]
+  # Uses prototype/Dockerfile
+  # No external Python deps — pure stdlib
+
+[env]
+  CLAWBIZARRE_PORT = "8420"
+  CLAWBIZARRE_ENV = "production"
+  CLAWBIZARRE_LOG_LEVEL = "INFO"
+  # DB path set by [mounts] below
+
+[http_service]
+  internal_port = 8420
+  force_https = true
+  auto_stop_machines = true    # Scales to zero when idle (save cost)
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 50
+    soft_limit = 25
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
+
+[mounts]
+  source = "clawbizarre_data"
+  destination = "/data"
+  # SQLite at /data/clawbizarre.db persists across deploys
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8420
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [services.concurrency]
+    hard_limit = 50
+    soft_limit = 25
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5s"
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
