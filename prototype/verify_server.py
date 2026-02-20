@@ -41,6 +41,14 @@ try:
 except ImportError:
     HAS_DOCKER_RUNNER = False
 
+try:
+    from lightweight_runner import LightweightRunner as _LightweightRunner
+    _lightweight_runner_instance = _LightweightRunner(prefer_docker=False)
+    HAS_LIGHTWEIGHT_RUNNER = True
+except ImportError:
+    HAS_LIGHTWEIGHT_RUNNER = False
+    _lightweight_runner_instance = None
+
 
 # ── Verification Tiers ──────────────────────────────────────────────
 
@@ -290,9 +298,14 @@ class VerificationEngine:
         
         start = time.monotonic()
         
-        # Use docker_runner for non-Python or when Docker requested
+        # Execution backend selection:
+        # 1. Docker: best isolation, required for use_docker=true or non-Python
+        # 2. Lightweight: subprocess-based, works without Docker (Python + JS)
+        # 3. Native Python: built-in, Python only
         if (language != "python" or use_docker) and HAS_DOCKER_RUNNER:
             results = self._run_docker_tests(code, language, tests, use_docker)
+        elif language != "python" and HAS_LIGHTWEIGHT_RUNNER:
+            results = self._run_lightweight_tests(code, language, tests)
         else:
             results = _execute_python_tests(code, tests)
         
@@ -426,6 +439,54 @@ class VerificationEngine:
         
         return TestResults(total=len(details), passed=passed, failed=failed, errors=errors, details=details)
 
+    def _run_lightweight_tests(self, code: str, language: str, tests: list) -> TestResults:
+        """
+        Run tests via lightweight_runner (no Docker required).
+        Used as fallback for non-Python languages when Docker is unavailable.
+        """
+        test_suite = {
+            "tests": [
+                {
+                    "id": t.get("name", t.get("id", f"test_{i}")),
+                    "type": "expression" if "expression" in t else "io",
+                    "expression": t.get("expression", ""),
+                    "input": t.get("input", ""),
+                    "expected_output": t.get("expected_output", t.get("expected", "")),
+                }
+                for i, t in enumerate(tests)
+            ]
+        }
+
+        run_result = _lightweight_runner_instance.run_test_suite(code, test_suite, language)
+
+        details = []
+        passed = failed = errors = 0
+        for r in run_result.get("results", []):
+            if r.get("passed"):
+                status = "pass"
+                passed += 1
+            elif r.get("error"):
+                status = "error"
+                errors += 1
+            else:
+                status = "fail"
+                failed += 1
+            details.append(TestDetail(
+                name=r.get("id", "test"),
+                status=status,
+                duration_ms=0.0,
+                output=r.get("output"),
+                error=r.get("error") if status in ("error", "fail") else None,
+            ))
+
+        return TestResults(
+            total=len(details),
+            passed=passed,
+            failed=failed,
+            errors=errors,
+            details=details,
+        )
+
     def _sign_receipt(self, receipt: VerificationReceipt) -> VerificationReceipt:
         """Sign a receipt with the engine's identity (if available)."""
         if not self.identity or not HAS_IDENTITY:
@@ -503,8 +564,16 @@ class VerifyHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "version": "clawbizarre-verify/1.0",
                 "vrf_version": "1.0",
-                "multilang": HAS_DOCKER_RUNNER,
-                "languages": ["python"] + (["javascript", "node", "bash"] if HAS_DOCKER_RUNNER else []),
+                "multilang": HAS_DOCKER_RUNNER or HAS_LIGHTWEIGHT_RUNNER,
+                "languages": (
+                    ["python", "javascript", "node", "bash"] if HAS_DOCKER_RUNNER
+                    else (["python", "javascript"] if HAS_LIGHTWEIGHT_RUNNER else ["python"])
+                ),
+                "execution_backends": {
+                    "docker": HAS_DOCKER_RUNNER,
+                    "lightweight": HAS_LIGHTWEIGHT_RUNNER,
+                    "native_python": True,
+                },
             })
         elif self.path.startswith("/receipt/"):
             receipt_id = self.path.split("/receipt/")[1]
