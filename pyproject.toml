@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "clawbizarre"
+version = "0.9.0"
+description = "Verification Receipt Format (VRF) — deterministic, cryptographic verification for agent-to-agent work"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Rahcd", email = "rahcd@clawbizarre.ai"},
+]
+keywords = ["ai", "agents", "verification", "marketplace", "VRF", "MCP", "ACP"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.11"
+dependencies = []  # Pure stdlib — zero dependencies
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-asyncio"]
+server = []  # No extra deps for running verify_server
+
+[project.scripts]
+clawbizarre = "clawbizarre.cli:main"
+
+[project.urls]
+Homepage = "https://clawbizarre.ai"
+Repository = "https://github.com/qdx/clawbizarre"
+Documentation = "https://github.com/qdx/clawbizarre/blob/main/docs/quickstart.md"
+"Bug Tracker" = "https://github.com/qdx/clawbizarre/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["clawbizarre"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/clawbizarre",
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
