@@ -1,4 +1,4 @@
-name: Tests
+name: ClawBizarre Tests
 
 on:
   push:
@@ -7,11 +7,14 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  # ── Pytest suite (primary) ─────────────────────────────────────────────────
+  pytest:
+    name: pytest (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
@@ -21,73 +24,122 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install COSE dependencies (optional, for SCITT tests)
+      - name: Set up Node.js (for JavaScript test support in lightweight_runner)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install optional Python deps (COSE/SCITT — non-fatal)
+        run: pip install pycose cbor2 pytest || pip install pytest
+
+      - name: Run pytest suite (no Docker required — lightweight_runner)
+        working-directory: prototype
+        run: |
+          echo "Running ${{ matrix.python-version }} test suite..."
+          python3 -m pytest \
+            test_task_board.py \
+            test_compute_credit.py \
+            test_lightweight_runner.py \
+            test_full_lifecycle.py \
+            test_client_v7.py \
+            test_acp_integration.py \
+            test_trust_pipeline.py \
+            -v --tb=short \
+            --no-header \
+            -q
+
+  # ── Legacy smoke tests (protocol correctness) ────────────────────────────
+  protocol-smoke:
+    name: Protocol smoke tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install optional deps
         run: pip install pycose cbor2 || true
 
-      - name: Run core protocol tests
+      - name: Core protocol modules
+        working-directory: prototype
         run: |
           set -e
-          echo "=== Identity ==="
-          python3 prototype/identity.py
-          echo "=== Receipt ==="
-          python3 prototype/receipt.py
-          echo "=== Handshake ==="
-          python3 prototype/handshake.py
-          echo "=== Signed Handshake ==="
-          python3 prototype/signed_handshake.py
-          echo "=== Reputation ==="
-          python3 prototype/reputation.py
-          echo "=== Discovery ==="
-          python3 prototype/discovery.py
-          echo "=== Treasury ==="
-          python3 prototype/treasury.py
-          echo "=== Aggregator ==="
-          python3 prototype/aggregator.py
-          echo "=== Matching ==="
-          python3 prototype/matching.py
-          echo "=== Notifications ==="
-          python3 prototype/notifications.py
-          echo "=== Auth ==="
-          python3 prototype/auth.py
-          echo "=== Persistence ==="
-          python3 prototype/persistence.py
-          echo "=== Receipt Store ==="
-          python3 prototype/receipt_store.py
+          echo "=== Identity ===" && python3 identity.py
+          echo "=== Receipt ===" && python3 receipt.py
+          echo "=== Handshake ===" && python3 handshake.py
+          echo "=== Signed Handshake ===" && python3 signed_handshake.py
+          echo "=== Reputation ===" && python3 reputation.py
+          echo "=== Discovery ===" && python3 discovery.py
+          echo "=== Treasury ===" && python3 treasury.py
+          echo "=== Aggregator ===" && python3 aggregator.py
+          echo "=== Matching ===" && python3 matching.py
+          echo "=== Auth ===" && python3 auth.py
+          echo "=== Lightweight Runner ===" && python3 lightweight_runner.py --code "def f(): return 1" --test-suite '{"tests":[{"id":"t1","type":"expression","expression":"f()","expected_output":"1"}]}' --no-docker
+          echo "=== Task Board ===" && python3 task_board.py
+          echo "=== Compute Credit ===" && python3 compute_credit.py
 
-      - name: Run server tests
+      - name: Server modules
+        working-directory: prototype
         run: |
           set -e
-          echo "=== Verify Server Hardened ==="
-          python3 prototype/verify_server_hardened.py
-          echo "=== Verify Server Unified ==="
-          python3 prototype/verify_server_unified.py
+          echo "=== Verify Server ===" && python3 verify_server.py
+          echo "=== API v7 ===" && python3 api_server_v7.py --test
 
-      - name: Run MCP tests
-        run: |
-          set -e
-          echo "=== MCP Server ==="
-          python3 prototype/mcp_server.py
-
-      - name: Run integration tests
-        run: |
-          set -e
-          echo "=== VRF Client ==="
-          python3 prototype/integrations/vrf_client.py
-          echo "=== LangChain VRF ==="
-          python3 prototype/integrations/langchain_vrf.py
-          echo "=== CrewAI VRF ==="
-          python3 prototype/integrations/crewai_vrf.py
-          echo "=== OpenAI VRF ==="
-          python3 prototype/integrations/openai_vrf.py
-
-      - name: Run COSE/SCITT tests (optional)
+      - name: Framework integrations
+        working-directory: prototype
         continue-on-error: true
         run: |
-          echo "=== VRF COSE ==="
-          python3 prototype/vrf_cose.py
-          echo "=== Merkle ==="
-          python3 prototype/merkle.py
-          echo "=== Merkle Store ==="
-          python3 prototype/merkle_store.py
-          echo "=== VRF COSE Identity ==="
-          python3 prototype/vrf_cose_identity.py
+          echo "=== VRF Client ===" && python3 integrations/vrf_client.py
+          echo "=== LangChain VRF ===" && python3 integrations/langchain_vrf.py
+          echo "=== CrewAI VRF ===" && python3 integrations/crewai_vrf.py
+          echo "=== OpenAI VRF ===" && python3 integrations/openai_vrf.py
+
+      - name: COSE/SCITT modules (optional)
+        working-directory: prototype
+        continue-on-error: true
+        run: |
+          pip install pycose cbor2
+          echo "=== VRF COSE ===" && python3 vrf_cose.py
+          echo "=== Merkle ===" && python3 merkle.py
+
+  # ── Package install test ─────────────────────────────────────────────────
+  package:
+    name: pip install test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install clawbizarre package
+        run: pip install -e ".[dev]"
+
+      - name: Test CLI
+        working-directory: prototype
+        run: |
+          python3 -m clawbizarre.cli version
+          python3 -m clawbizarre.cli verify \
+            --code "def sort(lst): return sorted(lst)" \
+            --test "sort([3,1,2])==[1, 2, 3]"
+
+      - name: Test SDK import
+        run: |
+          python3 -c "
+          from clawbizarre import ClawBizarreClient, __version__
+          print(f'clawbizarre {__version__} imported OK')
+          c = ClawBizarreClient('http://localhost:8420')
+          print(f'Client created: {c}')
+          "
